@@ -1,12 +1,17 @@
 #include <Arduino.h>
 
 /*
-  AsyncElegantOTA Demo Example - This example will work for both ESP8266 & ESP32 microcontrollers.
-  -----
-  Author: Ayush Sharma ( https://github.com/ayushsharma82 )
-  
-  Important Notice: Star the repository on Github if you like the library! :)
-  Repository Link: https://github.com/ayushsharma82/AsyncElegantOTA
+        Central heating relays are attached to two esp32 pins
+        Allows OTA updates (in theory- need to test!)
+            Ideally would interwork with wifimanager of some kind!
+        Provides a single GET endpoint at /set_state passing hot_water and heating as params
+        1 means on!
+        Anything else is considered off
+
+        Credentials are hardcoded in a credentials.h file (not in repo)
+        with two variables:
+              const char* ssid = "........";
+              const char* password = "........";
 */
 
 #if defined(ESP8266)
