@@ -27,10 +27,13 @@
 
 #include "credentials.h"
 
-#define PIN_HOT_WATER 12
+#define PIN_HOT_WATER 4
 #define PIN_HEATING 15
 #define ON_STATE false
 #define OFF_STATE true
+
+
+char hostname[]="heatingrelays";
 
 
 
@@ -79,9 +82,10 @@ void setup(void) {
   pinMode(PIN_HOT_WATER,OUTPUT);
   pinMode(PIN_HEATING,OUTPUT);
   Serial.begin(115200);
+
+  WiFi.setHostname(hostname);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
-  WiFi.setHostname("centralheatingrelays");
   delay(1000);
   WiFi.begin(ssid, password);
   delay(1000);
@@ -100,7 +104,7 @@ void setup(void) {
   Serial.println(WiFi.localIP());
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "Hi! This is a sample response.\n* Use /set_state?heating=1&hot_water=0");
+    request->send(200, "text/plain", "Hi! This is a sample response.\n* Use /set_state?heating=1&hot_water=0\n use /update to change the firmware");
   });
 
   server.on("/set_state",HTTP_GET,[](AsyncWebServerRequest *request)
