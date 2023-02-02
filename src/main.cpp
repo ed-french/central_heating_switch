@@ -48,7 +48,9 @@ AsyncWebServer server(80);
 void restart_esp()
 {
 
-  ESP.restart();
+  //ESP.restart();
+  AsyncElegantOTA.restart();// Using this in preference as it includes a better shutdown of the server perhaps?
+  
 }
 
 void set_heating_state(AsyncWebServerRequest *req)
@@ -107,7 +109,7 @@ void setup(void) {
   {
     if (millis()>wifi_timeout)
     {
-      ESP.restart(); // Force restart if wifi hasn't connected by timeout
+      esp_restart(); // Force restart if wifi hasn't connected by timeout
     }
     delay(500);
     Serial.print(".");

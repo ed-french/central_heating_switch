@@ -8,3 +8,4 @@ src/credentials.cpp
 .vscode/extensions.json
 include/*
 lib/*
+src/credentials.h
