@@ -9,3 +9,4 @@ src/credentials.cpp
 include/*
 lib/*
 src/credentials.h
+python/heaplog.txt
