@@ -24,13 +24,23 @@
 
 #include <ESPAsyncWebServer.h>
 #include <AsyncElegantOTA.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 
 #include "credentials.h"
+#include "TFT_eSPI.h"
+
+
 
 #define PIN_HOT_WATER 4
 #define PIN_HEATING 15
 #define ON_STATE false
 #define OFF_STATE true
+
+char get_time_url[]="http://192.168.1.125/gettime";
+
+
+TFT_eSPI tft = TFT_eSPI();
 
 
 char hostname[]="heatingandoil";
@@ -45,6 +55,15 @@ char temp_buff[1023];
 AsyncWebServer server(80);
 
 
+void show_message(const char * mess,uint16_t delay_ms=2000)
+{
+  tft.fillScreen(TFT_BLACK);
+  tft.setCursor(0,0);
+  tft.print(mess);
+  delay(delay_ms);
+}
+
+
 void restart_esp()
 {
 
@@ -52,6 +71,77 @@ void restart_esp()
   AsyncElegantOTA.restart();// Using this in preference as it includes a better shutdown of the server perhaps?
   
 }
+
+
+void get_and_show_time()
+{
+  // fetches the time from the server locally
+  // displays the time prt of it on the tft bottom without deleting anything else there
+  
+  // check wifi still connected, otherwise save last sent and reboot
+
+  if (WiFi.status()!=WL_CONNECTED)
+  {
+    Serial.println("WIFI DOWN!!!!");
+    show_message("WiFi Down",3000);    ESP.restart();
+  }
+
+
+  // Make request
+
+    HTTPClient http;
+
+
+    uint8_t tries_left=1;
+
+
+    while (tries_left>0)
+    {
+      char mess_buff[255];
+      http.begin(get_time_url);
+
+      // Send HTTP GET request
+      int httpResponseCode = http.GET();
+
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);      
+
+      //sprintf(mess_buff,"HTTP RESPONSE:\n%d",httpResponseCode);
+      //show_message(mess_buff);
+
+      if (httpResponseCode>0)
+      {
+        String payload = http.getString();
+        Serial.println(payload); 
+
+        if (httpResponseCode==200)
+        {
+          tft.fillRect(0,100,240,135,TFT_OLIVE);
+          tft.setCursor(8,108);
+          tft.print(payload.substring(11).c_str());
+          delay(1000);
+          Serial.println("Done.");
+          break;
+        }
+        Serial.print("Error code: ");
+        Serial.println(httpResponseCode);
+
+        Serial.println("Trying again...");
+        delay(100);
+
+      }
+
+      http.end();      
+      
+
+
+      tries_left--;
+    }
+
+
+}
+
+
 
 void set_heating_state(AsyncWebServerRequest *req)
 {
@@ -93,6 +183,10 @@ void setup(void) {
   pinMode(PIN_HOT_WATER,OUTPUT);
   pinMode(PIN_HEATING,OUTPUT);
   Serial.begin(115200);
+  tft.begin();
+  tft.setRotation(1);
+  tft.setTextSize(2);
+
 
   WiFi.setHostname(hostname);
   WiFi.mode(WIFI_STA);
@@ -119,6 +213,9 @@ void setup(void) {
   Serial.println(ssid);
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+
+  sprintf(temp_buff,"CONNECTED\nIP ADDR:\n%s",WiFi.localIP().toString());
+  show_message(temp_buff,5000);
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/plain", "Hi! This is a sample response.\n"
@@ -160,5 +257,6 @@ void loop(void) {
   {
     restart_esp();
   }
-  delay(1000);
+  delay(5000);
+  get_and_show_time();
 }
