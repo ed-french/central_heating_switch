@@ -33,7 +33,9 @@
 #define OFF_STATE true
 
 
-char hostname[]="heatingrelays";
+char hostname[]="heatingandoil";
+
+char temp_buff[1023];
 
 
 
@@ -41,6 +43,13 @@ char hostname[]="heatingrelays";
 // const char* password = "........";
 
 AsyncWebServer server(80);
+
+
+void restart_esp()
+{
+
+  ESP.restart();
+}
 
 void set_heating_state(AsyncWebServerRequest *req)
 {
@@ -93,7 +102,13 @@ void setup(void) {
   Serial.println("");
 
   // Wait for connection
-  while (WiFi.status() != WL_CONNECTED) {
+  uint32_t wifi_timeout=millis()+40000; // 40 seconds, then it reboots
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    if (millis()>wifi_timeout)
+    {
+      ESP.restart(); // Force restart if wifi hasn't connected by timeout
+    }
     delay(500);
     Serial.print(".");
   }
@@ -104,7 +119,11 @@ void setup(void) {
   Serial.println(WiFi.localIP());
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "Hi! This is a sample response.\n* Use /set_state?heating=1&hot_water=0\n use /update to change the firmware");
+    request->send(200, "text/plain", "Hi! This is a sample response.\n"
+                                      "\t* Use /set_state?heating=1&hot_water=0\n"
+                                      "\t* use /update to change the firmware\n"
+                                      "\t* use /getfreeheap to see memory state\n"
+                                      "\t* use /restart to reboot");
   });
 
   server.on("/set_state",HTTP_GET,[](AsyncWebServerRequest *request)
@@ -112,10 +131,32 @@ void setup(void) {
     set_heating_state(request);
   });
 
-  AsyncElegantOTA.begin(&server);    // Start AsyncElegantOTA
+  server.on("/restart",HTTP_GET,[](AsyncWebServerRequest *request)
+  {
+    restart_esp();
+  });
+
+  
+  server.on("/getfreeheap",HTTP_GET,[](AsyncWebServerRequest *request) {
+    uint32_t free=ESP.getFreeHeap();
+    sprintf(temp_buff,"Free heap=%d",free);
+    request->send(200,"text/plain",temp_buff);
+  });
+    
+
+  AsyncElegantOTA.begin(&server,ota_username,ota_password);    // Start AsyncElegantOTA
   server.begin();
   Serial.println("HTTP server started");
 }
 
+
+
+
+
 void loop(void) {
+  if (millis()>(1000*60*60*24*1) || WiFi.status()!=WL_CONNECTED)  // Reboot 1x per day
+  {
+    restart_esp();
+  }
+  delay(1000);
 }
