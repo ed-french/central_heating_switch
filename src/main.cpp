@@ -32,8 +32,9 @@
 
 
 
-#define PIN_HOT_WATER 4
-#define PIN_HEATING 15
+#define PIN_HOT_WATER 26
+#define PIN_HEATING 27
+#define PIN_OIL_BURNER 25
 #define ON_STATE false
 #define OFF_STATE true
 
@@ -45,8 +46,17 @@ TFT_eSPI tft = TFT_eSPI();
 
 char hostname[]="heatingandoil";
 
+bool tick_flag=true;
+
 char temp_buff[1023];
 
+char current_time[20];
+bool oil_burning=false;
+
+char ip_address[20];
+
+bool heating_on=false;
+bool hot_water_on=false;
 
 
 // const char* ssid = "........";
@@ -73,11 +83,9 @@ void restart_esp()
 }
 
 
-void get_and_show_time()
+void get_time()
 {
-  // fetches the time from the server locally
-  // displays the time prt of it on the tft bottom without deleting anything else there
-  
+// fetches the time from the server locally, goes in the global current_time
   // check wifi still connected, otherwise save last sent and reboot
 
   if (WiFi.status()!=WL_CONNECTED)
@@ -116,15 +124,14 @@ void get_and_show_time()
 
         if (httpResponseCode==200)
         {
-          tft.fillRect(0,100,240,135,TFT_OLIVE);
-          tft.setCursor(8,108);
-          tft.print(payload.substring(11).c_str());
-          delay(1000);
-          Serial.println("Done.");
-          break;
+          strncpy(current_time,payload.substring(11,16).c_str(),12);
+          Serial.printf("Time found is : %s\n",current_time);
+          http.end();
+          return;
         }
         Serial.print("Error code: ");
         Serial.println(httpResponseCode);
+        sprintf(current_time,"fail %d",httpResponseCode);
 
         Serial.println("Trying again...");
         delay(100);
@@ -137,10 +144,100 @@ void get_and_show_time()
 
       tries_left--;
     }
+}
+
+void get_oil_burning()
+{
+  // Sets the global oil_burning
+  oil_burning=!digitalRead(PIN_OIL_BURNER);
+}
+
+void get_and_show_time()
+{
+    get_time();
+  // displays the time prt of it on the tft bottom without deleting anything else there
+    tft.fillRect(0,100,240,135,TFT_OLIVE);
+    tft.setCursor(8,108);
+    tft.print(current_time);
+}
+
+void update_display(bool update_time)
+{
+    if (update_time) get_time(); // Update the record of the time
+    get_oil_burning();
+    tft.fillScreen(TFT_BLACK);
+
+
+
+    // Display tick flag (small o in top right)
+    tft.setCursor(225,0);
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_RED,TFT_BLACK);
+    if (tick_flag) tft.print("o");
+
+
+    // Display Burning or not
+    tft.setCursor(58,3);
+    tft.setTextSize(3);
+    if (oil_burning)
+    {
+      tft.setTextColor(TFT_WHITE,TFT_RED);
+      tft.print("BURNING");
+    } else {
+      tft.setTextColor(TFT_LIGHTGREY,TFT_DARKGREY);
+      tft.print("NO BURN");
+    }
+
+
+    // Hot water
+    tft.setCursor(15,40);
+    tft.setTextSize(3);
+    if (hot_water_on)
+    {
+      tft.setTextColor(TFT_WHITE,TFT_RED);
+      tft.print("WATER");
+    } else {
+      tft.setTextColor(TFT_DARKGREY,TFT_BLACK);
+      tft.print("WATER");
+    }
+
+    //HEATING
+
+    tft.setCursor(145,40);
+    tft.setTextSize(3);
+
+    if (heating_on)
+    {
+      tft.setTextColor(TFT_WHITE,TFT_RED);
+      tft.print("HEAT");
+    } else {
+      tft.setTextColor(TFT_DARKGREY,TFT_BLACK);
+      tft.print("HEAT");
+      
+    }
+
+    
+
+
+
+
+
+    // Display the IP address
+    tft.setTextSize(2);
+    tft.setCursor(6,87);
+    tft.setTextColor(TFT_GREENYELLOW,TFT_BLACK);
+    tft.print(ip_address);
+
+    // Display the time
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_WHITE,TFT_OLIVE);
+    tft.fillRect(0,110,240,135,TFT_OLIVE);
+    tft.setCursor(95,115);
+    tft.print(current_time);
+
 
 
 }
-
 
 
 void set_heating_state(AsyncWebServerRequest *req)
@@ -176,12 +273,18 @@ void set_heating_state(AsyncWebServerRequest *req)
   digitalWrite(PIN_HOT_WATER,new_hot_water?ON_STATE:OFF_STATE);
   digitalWrite(PIN_HEATING,new_heating?ON_STATE:OFF_STATE);
 
+  heating_on=new_heating;
+  hot_water_on=new_hot_water;
+
   req->send(200,"text/plain","OK");
 }
 
-void setup(void) {
+void setup(void)
+{
   pinMode(PIN_HOT_WATER,OUTPUT);
   pinMode(PIN_HEATING,OUTPUT);
+  pinMode(PIN_OIL_BURNER,INPUT_PULLUP);
+
   Serial.begin(115200);
   tft.begin();
   tft.setRotation(1);
@@ -212,9 +315,10 @@ void setup(void) {
   Serial.print("Connected to ");
   Serial.println(ssid);
   Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  strncpy(ip_address,WiFi.localIP().toString().c_str(),19);
+  Serial.println(ip_address);
 
-  sprintf(temp_buff,"CONNECTED\nIP ADDR:\n%s",WiFi.localIP().toString());
+  sprintf(temp_buff,"CONNECTED\nIP ADDR:\n%s",ip_address);
   show_message(temp_buff,5000);
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -252,11 +356,22 @@ void setup(void) {
 
 
 
-void loop(void) {
-  if (millis()>(1000*60*60*24*1) || WiFi.status()!=WL_CONNECTED)  // Reboot 1x per day
+void loop(void)
+{
+  for (uint8_t i=0;i<60;i++)
   {
-    restart_esp();
+      if (millis()>(1000*60*60*24*1) || WiFi.status()!=WL_CONNECTED)  // Reboot 1x per day
+      {
+        restart_esp();
+      }
+
+      update_display(i==0);// Once a minute fetch the time
+
+      tick_flag=!tick_flag;
+      delay(1000);
   }
-  delay(5000);
-  get_and_show_time();
+
+  
+  
 }
+  
