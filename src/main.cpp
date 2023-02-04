@@ -30,7 +30,7 @@
 #include "credentials.h"
 #include "TFT_eSPI.h"
 
-
+#define SCHEDULED_SEND_INTERVAL_MS 1000*60*10 
 
 #define PIN_HOT_WATER 26
 #define PIN_HEATING 27
@@ -57,6 +57,12 @@ char ip_address[20];
 
 bool heating_on=false;
 bool hot_water_on=false;
+
+bool last_send_ok=false;
+
+
+
+String oil_server_url = "http://192.168.1.125/oil_sensor";
 
 
 // const char* ssid = "........";
@@ -146,10 +152,86 @@ void get_time()
     }
 }
 
-void get_oil_burning()
+
+
+
+void send_status(uint16_t bat_reading,float voltage,bool burning,bool scheduled,float bus_volts)
 {
-  // Sets the global oil_burning
-  oil_burning=!digitalRead(PIN_OIL_BURNER);
+
+  // check wifi still connected, otherwise save last sent and reboot
+
+  if (WiFi.status()!=WL_CONNECTED)
+  {
+    Serial.println("WIFI DOWN!!!!");
+    show_message("WiFi Down",3000);
+    ESP.restart();
+  }
+
+
+  // Make request
+
+    HTTPClient http;
+
+    String serverPath = oil_server_url + "?volts="+String(voltage)+ \
+                        "&reading="+String(bat_reading)+ \
+                        "&burning="+String(burning?"yes":"no")+ \
+                        "&scheduled="+String(scheduled?"yes":"no")+ \
+                        "&vbus="+String(bus_volts);
+    uint8_t tries_left=4;
+
+
+    while (tries_left>0)
+    {
+      char mess_buff[255];
+      http.begin(serverPath.c_str());
+
+      // Send HTTP GET request
+      int httpResponseCode = http.GET();
+
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);      
+
+      sprintf(mess_buff,"HTTP RESPONSE:\n%d",httpResponseCode);
+      show_message(mess_buff);
+
+      if (httpResponseCode>0)
+      {
+        String payload = http.getString();
+        Serial.println(payload); 
+
+        if (httpResponseCode==200)
+        {
+          Serial.println("Done.");
+          last_send_ok=true;
+          break;
+        }
+        last_send_ok=false;
+        Serial.print("Error code: ");
+        Serial.println(httpResponseCode);
+
+        Serial.println("Trying again...");
+        delay(100);
+
+      }
+
+      http.end();      
+      
+
+
+      tries_left--;
+    }
+
+
+
+}
+
+bool get_oil_burning()
+{
+  // Sets the global oil_burning, returns true if it changed
+  bool new_oil_burning=!digitalRead(PIN_OIL_BURNER);
+  bool resp=(new_oil_burning!=oil_burning);
+  oil_burning=new_oil_burning;
+  return resp;
 }
 
 void get_and_show_time()
@@ -164,7 +246,7 @@ void get_and_show_time()
 void update_display(bool update_time)
 {
     if (update_time) get_time(); // Update the record of the time
-    get_oil_burning();
+
     tft.fillScreen(TFT_BLACK);
 
 
@@ -214,6 +296,18 @@ void update_display(bool update_time)
       tft.setTextColor(TFT_DARKGREY,TFT_BLACK);
       tft.print("HEAT");
       
+    }
+
+    //OIL SEND SUCCESS LAST TIME
+    tft.setCursor(2,2);
+    tft.setTextSize(2);
+    if (last_send_ok)
+    {
+      tft.setTextColor(TFT_WHITE,TFT_OLIVE);
+      tft.print("OK");
+    } else {
+      tft.setTextColor(TFT_WHITE,TFT_RED);
+      tft.print("X");
     }
 
     
@@ -358,20 +452,32 @@ void setup(void)
 
 void loop(void)
 {
-  for (uint8_t i=0;i<60;i++)
+  uint32_t next_sched_send_ms=millis();// Send straight away first time
+  while (true)
   {
-      if (millis()>(1000*60*60*24*1) || WiFi.status()!=WL_CONNECTED)  // Reboot 1x per day
-      {
-        restart_esp();
-      }
+    for (uint8_t i=0;i<60;i++)
+    {
+        if (millis()>(1000*60*60*24*1) || WiFi.status()!=WL_CONNECTED)  // Reboot 1x per day
+        {
+          restart_esp();
+        }
+        bool oil_change=get_oil_burning();// updates global too
+        update_display(i==0);// Once a minute fetch the time
+        if (oil_change)
+        {
+          send_status(0,0.0,oil_burning,false,0.0);
+        }
+        tick_flag=!tick_flag;
+        delay(1000);
+    }
+    // Every minute check if it's time for a scheduled update
+    if (next_sched_send_ms<millis())
+    {
+      next_sched_send_ms=millis()+SCHEDULED_SEND_INTERVAL_MS;
+      send_status(0,0.0,oil_burning,true,0.0);
+    }
 
-      update_display(i==0);// Once a minute fetch the time
-
-      tick_flag=!tick_flag;
-      delay(1000);
   }
-
-  
   
 }
   
